@@ -117,7 +117,15 @@ jsonSource_portsports_maroc_coordonnees_qgis_1_9.addFeatures(features_portsports
 var lyr_portsports_maroc_coordonnees_qgis_1_9 = new ol.layer.Vector({
                 declutter: false,
                 source:jsonSource_portsports_maroc_coordonnees_qgis_1_9, 
-                style: style_portsports_maroc_coordonnees_qgis_1_9,
+                style: style_portsports_maroc_coordonnees_qgis_1_9 || new ol.style.Style({
+    stroke: new ol.style.Stroke({
+        color: '#3388ff',
+        width: 2
+    }),
+    fill: new ol.style.Fill({
+        color: 'rgba(51, 136, 255, 0.2)'
+    })
+}),
                 popuplayertitle: 'ports — ports_maroc_coordonnees_qgis_1',
                 interactive: true,
                 title: '<img src="styles/legend/portsports_maroc_coordonnees_qgis_1_9.png" /> ports — ports_maroc_coordonnees_qgis_1'
