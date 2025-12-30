@@ -9,24 +9,24 @@
     <style>
         body { margin:0; padding:0; font-family: Arial, sans-serif; }
         #map { width:100%; height:100vh; }
-        #info { 
+        #loading { 
             position: absolute; 
-            top: 10px; 
-            left: 50px; 
+            top: 20px; 
+            left: 20px; 
             background: white; 
-            padding: 10px; 
+            padding: 15px; 
             border-radius: 5px; 
-            box-shadow: 0 0 10px rgba(0,0,0,0.2);
+            box-shadow: 0 0 10px rgba(0,0,0,0.3);
             z-index: 1000;
             max-width: 300px;
         }
     </style>
 </head>
 <body>
-    <div id="info">
-        <h3>Morocco Map</h3>
-        <p id="status">Loading map data...</p>
-        <div id="file-list"></div>
+    <div id="loading">
+        <h3>Loading Morocco Map...</h3>
+        <div id="status">Checking data files...</div>
+        <div id="file-status"></div>
     </div>
     <div id="map"></div>
     
@@ -39,131 +39,168 @@
             attribution: '© OpenStreetMap contributors'
         }).addTo(map);
         
-        // Function to load and display any GeoJSON file
-        function loadLayer(filename, color, layerName) {
-            document.getElementById('status').innerHTML = 'Loading: ' + filename;
-            
-            fetch(filename)
-                .then(response => {
-                    if (!response.ok) {
-                        throw new Error('File not found: ' + filename);
-                    }
-                    return response.json();
-                })
-                .then(data => {
-                    console.log('Loaded:', filename, data);
+        // Function to load JS files (which contain GeoJSON data as variables)
+        function loadJSDataFile(filename, color, layerName) {
+            return new Promise((resolve, reject) => {
+                // Create a script element to load the JS file
+                var script = document.createElement('script');
+                script.src = filename;
+                script.onload = function() {
+                    // The JS file should define a variable with GeoJSON data
+                    // Try to find the variable name from the filename
+                    var varName = filename.replace('./layers/', '')
+                                          .replace('.js', '')
+                                          .replace(/\//g, '_');
                     
-                    // Create the layer
-                    var layer = L.geoJSON(data, {
-                        style: function(feature) {
-                            return {
+                    // Common qgis2web variable patterns
+                    var possibleVarNames = [
+                        'json_' + varName,
+                        varName,
+                        'data_' + varName
+                    ];
+                    
+                    // Try each possible variable name
+                    var geoJSONData = null;
+                    for (var i = 0; i < possibleVarNames.length; i++) {
+                        if (window[possibleVarNames[i]]) {
+                            geoJSONData = window[possibleVarNames[i]];
+                            console.log('Found data in variable:', possibleVarNames[i]);
+                            break;
+                        }
+                    }
+                    
+                    if (geoJSONData) {
+                        // Add to map
+                        var layer = L.geoJSON(geoJSONData, {
+                            style: {
                                 color: color,
                                 weight: 2,
                                 fillColor: color,
                                 fillOpacity: 0.2,
                                 opacity: 0.8
-                            };
-                        },
-                        onEachFeature: function(feature, layer) {
-                            // Create popup content from properties
-                            if (feature.properties) {
-                                var popupContent = '<div style="max-width:250px;">';
-                                popupContent += '<b>' + layerName + '</b><br><hr>';
-                                for (var key in feature.properties) {
-                                    if (feature.properties[key]) {
-                                        popupContent += '<b>' + key + ':</b> ' + 
-                                                       feature.properties[key] + '<br>';
+                            },
+                            onEachFeature: function(feature, layer) {
+                                if (feature.properties) {
+                                    var popupContent = '<div style="max-width:250px;">';
+                                    popupContent += '<b>' + layerName + '</b><br><hr>';
+                                    for (var key in feature.properties) {
+                                        if (feature.properties[key] && feature.properties[key] !== 'null') {
+                                            popupContent += '<b>' + key + ':</b> ' + 
+                                                           feature.properties[key] + '<br>';
+                                        }
                                     }
+                                    popupContent += '</div>';
+                                    layer.bindPopup(popupContent);
                                 }
-                                popupContent += '</div>';
-                                layer.bindPopup(popupContent);
                             }
-                        }
-                    }).addTo(map);
-                    
-                    // Update UI
-                    document.getElementById('status').innerHTML = 
-                        '✓ Loaded: ' + filename;
-                    document.getElementById('file-list').innerHTML += 
-                        '<div style="color:green; margin:5px 0;">✓ ' + filename + '</div>';
-                    
-                    return layer;
-                })
-                .catch(error => {
-                    console.log('Could not load:', filename, error);
-                    document.getElementById('file-list').innerHTML += 
-                        '<div style="color:orange; margin:5px 0;">✗ ' + filename + ' (not found)</div>';
-                });
+                        }).addTo(map);
+                        
+                        updateStatus('✓ Loaded: ' + filename);
+                        resolve(layer);
+                    } else {
+                        updateStatus('✗ No data found in: ' + filename);
+                        reject(new Error('No GeoJSON data found in JS file'));
+                    }
+                };
+                script.onerror = function() {
+                    updateStatus('✗ Failed to load: ' + filename);
+                    reject(new Error('Failed to load JS file'));
+                };
+                
+                document.head.appendChild(script);
+            });
         }
         
-        // AUTOMATIC FILE DISCOVERY
-        // Try to load common qgis2web file patterns
-        window.onload = function() {
-            console.log('Starting automatic file discovery...');
+        // Status update function
+        function updateStatus(message) {
+            document.getElementById('file-status').innerHTML += 
+                '<div style="margin:5px 0; padding:3px; border-left:3px solid ' + 
+                (message.startsWith('✓') ? 'green' : 'orange') + '">' + message + '</div>';
+            console.log(message);
+        }
+        
+        // Load all data files
+        async function loadAllData() {
+            updateStatus('Starting data load...');
             
-            // Common qgis2web output patterns based on your layers.js
-            const filesToTry = [
-                // Try GeoJSON files first
-                './layers/portsports_maroc_coordonnees_qgis_1_9.json',
-                './layers/map_10.json',
-                './layers/provinces.json',
-                './layers/ports.json',
-                
-                // Try JavaScript data files
-                './layers/portsports_maroc_coordonnees_qgis_1_9.js',
-                './layers/map_10.js',
-                './layers/layers.js',
-                
-                // Try root-level files
-                './data/layers.json',
-                './layers/layers.json'
+            // Based on your console errors, these are the files that exist
+            const filesToLoad = [
+                {
+                    filename: './layers/portsports_maroc_coordonnees_qgis_1_9.js',
+                    color: '#3388ff',
+                    name: 'Ports'
+                },
+                {
+                    filename: './layers/map_10.js',
+                    color: '#33aa33', 
+                    name: 'Provinces'
+                }
             ];
             
-            // Try each file
-            let filesFound = 0;
-            filesToTry.forEach((file, index) => {
-                // Load ports in blue, provinces in green
-                const color = file.includes('ports') ? '#3388ff' : 
-                             file.includes('map_10') ? '#33aa33' : 
-                             file.includes('provinces') ? '#33aa33' : '#888888';
-                
-                const layerName = file.includes('ports') ? 'Ports' : 
-                                file.includes('map_10') ? 'Provinces' : 
-                                file.includes('provinces') ? 'Provinces' : 'Layer';
-                
-                // Load with a slight delay to see progress
-                setTimeout(() => {
-                    loadLayer(file, color, layerName);
-                }, index * 500);
-            });
+            let loadedCount = 0;
             
-            // Final check after 5 seconds
-            setTimeout(() => {
-                if (filesFound === 0) {
-                    document.getElementById('status').innerHTML = 
-                        'No data files found automatically. Checking layers folder...';
-                    checkLayersFolder();
+            for (const file of filesToLoad) {
+                try {
+                    updateStatus('Loading: ' + file.filename);
+                    await loadJSDataFile(file.filename, file.color, file.name);
+                    loadedCount++;
+                } catch (error) {
+                    updateStatus('Error loading ' + file.filename + ': ' + error.message);
                 }
-            }, 5000);
-        };
-        
-        // Function to check what's in the layers folder
-        function checkLayersFolder() {
-            // Try to fetch directory listing (won't work on GitHub Pages)
-            // But we can at least log what we tried
-            console.log('These files were tried:');
-            console.log('- portsports_maroc_coordonnees_qgis_1_9.json/.js');
-            console.log('- map_10.json/.js');
-            console.log('- provinces.json');
-            console.log('- ports.json');
+            }
             
+            // Update final status
             document.getElementById('status').innerHTML = 
-                'Please check your browser Console (F12) for file loading attempts.';
+                'Loaded ' + loadedCount + ' of ' + filesToLoad.length + ' layers';
+            
+            if (loadedCount === 0) {
+                updateStatus('No layers loaded. Trying alternative method...');
+                tryAlternativeMethod();
+            }
         }
         
-        // Add scale and zoom controls
+        // Alternative method: Try to parse JS files as text
+        function tryAlternativeMethod() {
+            updateStatus('Trying to parse JS files as text...');
+            
+            // Try to load and parse the JS files manually
+            fetch('./layers/portsports_maroc_coordonnees_qgis_1_9.js')
+                .then(response => response.text())
+                .then(jsContent => {
+                    console.log('JS file content (first 500 chars):', jsContent.substring(0, 500));
+                    
+                    // Look for GeoJSON data in the JS file
+                    // Common pattern: var json_something = { ... };
+                    var jsonMatch = jsContent.match(/var json_[^=]*=\s*(\{.*?\});/s);
+                    if (jsonMatch) {
+                        updateStatus('Found JSON data in JS file');
+                        try {
+                            var geoJSON = JSON.parse(jsonMatch[1]);
+                            updateStatus('✓ Successfully parsed GeoJSON');
+                            // Add to map here
+                        } catch (e) {
+                            updateStatus('✗ Could not parse JSON: ' + e.message);
+                        }
+                    } else {
+                        updateStatus('No JSON variable found in JS file');
+                    }
+                })
+                .catch(e => updateStatus('Failed to fetch JS file: ' + e.message));
+        }
+        
+        // Start loading when page loads
+        window.onload = function() {
+            document.getElementById('status').innerHTML = 'Starting data load...';
+            setTimeout(loadAllData, 1000);
+            
+            // Auto-hide loading panel after 10 seconds
+            setTimeout(function() {
+                document.getElementById('loading').style.opacity = '0.7';
+            }, 10000);
+        };
+        
+        // Add map controls
         L.control.scale().addTo(map);
-        map.zoomControl.setPosition('topright');
     </script>
 </body>
 </html>
